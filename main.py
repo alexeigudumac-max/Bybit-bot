@@ -5,7 +5,7 @@ import requests
 import json
 import os
 from datetime import datetime
-
+print("✅ Bot pornit cu succes pe Render!")
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 
@@ -127,4 +127,5 @@ def run_bot():
         time.sleep(900)
 
 if __name__ == "__main__":
+    print(f"✅ Activare mesaj de pornire la ora {datetime.now().strftime('%H:%M')}")
     run_bot()
