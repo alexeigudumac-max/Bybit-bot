@@ -1,131 +1,114 @@
 import time
+import requests
 import hmac
 import hashlib
-import requests
-import json
-import os
 from datetime import datetime
-print("✅ Bot pornit cu succes pe Render!")
-API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
+import pandas as pd
 
-SYMBOL = "ETHUSDT"
-INTERVAL = "15"
+# 🔐 Chei API - completează cu valorile tale
+API_KEY = 'ADAUGĂ_CHEIA_TA'
+API_SECRET = 'ADAUGĂ_SECRETUL_TĂU'
+
+# ⚙️ Setări
+SYMBOL = 'ETHUSDT'
+INTERVAL = '15'  # 15 minute
 LIMIT = 100
-QUANTITY = 0.01  # Ajustează după nevoi
+BASE_URL = 'https://api.bybit.com'  # pentru Mainnet
 
-BASE_URL = "https://api.bybit.com"
-
-def get_signature(params, secret):
-    param_str = '&'.join([f"{key}={value}" for key, value in sorted(params.items())])
-    return hmac.new(
-        bytes(secret, "utf-8"),
-        bytes(param_str, "utf-8"),
-        hashlib.sha256
-    ).hexdigest()
-
+# 📊 Obține datele de kline (lumânări)
 def get_kline_data():
-    endpoint = "/v5/market/kline"
-    url = f"{BASE_URL}{endpoint}"
-    params = {
-        "category": "linear",
-        "symbol": SYMBOL,
-        "interval": INTERVAL,
-        "limit": LIMIT
-    }
-
     try:
+        url = f"{BASE_URL}/v5/market/kline"
+        params = {
+            "category": "linear",
+            "symbol": SYMBOL,
+            "interval": INTERVAL,
+            "limit": LIMIT
+        }
         response = requests.get(url, params=params)
-        response.raise_for_status()
         data = response.json()
-        if "result" in data and "list" in data["result"]:
-            return list(reversed(data["result"]["list"]))
+        if data['retCode'] == 0:
+            df = pd.DataFrame(data['result']['list'])
+            df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover']
+            df['close'] = df['close'].astype(float)
+            return df['close'].tolist()
         else:
-            print("Datele nu sunt disponibile.")
+            print("Eroare la obținerea datelor:", data)
             return None
     except Exception as e:
-        print(f"KLINE error: {e}")
+        print("Excepție în get_kline_data:", e)
         return None
 
+# 📈 Calcule EMA
 def calculate_ema(data, period):
-    prices = [float(k[4]) for k in data]  # k[4] = close price
-    ema = []
-    k = 2 / (period + 1)
-    ema.append(prices[0])
-    for price in prices[1:]:
-        ema.append(price * k + ema[-1] * (1 - k))
-    return ema
+    df = pd.DataFrame(data, columns=['close'])
+    return df['close'].ewm(span=period).mean().tolist()
 
+# 🔄 Calcule RSI
 def calculate_rsi(data, period=14):
-    closes = [float(k[4]) for k in data]
-    gains = []
-    losses = []
+    df = pd.DataFrame(data, columns=['close'])
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.tolist()
 
-    for i in range(1, len(closes)):
-        change = closes[i] - closes[i - 1]
-        gains.append(max(0, change))
-        losses.append(abs(min(0, change)))
+# 🔐 Semnătură HMAC
+def get_signature(params):
+    query_string = '&'.join([f"{k}={v}" for k, v in sorted(params.items())])
+    return hmac.new(API_SECRET.encode(), query_string.encode(), hashlib.sha256).hexdigest()
 
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-    rsi_values = []
-
-    for i in range(period, len(closes)):
-        gain = gains[i - 1]
-        loss = losses[i - 1]
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-        rs = avg_gain / avg_loss if avg_loss != 0 else 0
-        rsi = 100 - (100 / (1 + rs))
-        rsi_values.append(rsi)
-
-    return rsi_values
-
+# 📤 Plasare ordin
 def place_order(side):
-    endpoint = "/v5/order/create"
-    url = f"{BASE_URL}{endpoint}"
-    timestamp = str(int(time.time() * 1000))
-    params = {
-        "api_key": API_KEY,
-        "timestamp": timestamp,
-        "symbol": SYMBOL,
-        "side": side,
-        "order_type": "Market",
-        "qty": QUANTITY,
-        "time_in_force": "GoodTillCancel"
-    }
-    params["sign"] = get_signature(params, API_SECRET)
-
     try:
+        url = f"{BASE_URL}/v5/order/create"
+        timestamp = str(int(time.time() * 1000))
+        params = {
+            "category": "linear",
+            "symbol": SYMBOL,
+            "side": side,
+            "orderType": "Market",
+            "qty": "0.01",  # ⚠️ Ajustează cantitatea
+            "timeInForce": "GoodTillCancel",
+            "apiKey": API_KEY,
+            "timestamp": timestamp
+        }
+        params["sign"] = get_signature(params)
         response = requests.post(url, data=params)
-        print(f"Răspuns ordin: {response.text}")
+        print(f"📤 Răspuns ordin ({side}): {response.text}")
     except Exception as e:
-        print(f"Eroare ordin: {e}")
+        print("❌ Eroare la trimitere ordin:", e)
 
+# 🤖 Botul principal
 def run_bot():
-    print("Bot pornit... Verificare la fiecare 15 minute.")
+    print("✅ Bot pornit... Verificare la fiecare 60 secunde.")
     while True:
+        print(f"\n🕒 {datetime.now().strftime('%H:%M:%S')} | Încep verificarea...")
+
         kline_data = get_kline_data()
         if kline_data:
             ema10 = calculate_ema(kline_data, 10)
             ema30 = calculate_ema(kline_data, 30)
             rsi = calculate_rsi(kline_data)
 
-            print(f"{datetime.now()} | EMA10: {ema10[-1]:.2f}, EMA30: {ema30[-1]:.2f}, RSI: {rsi[-1]:.2f}")
+            print(f"EMA10: {ema10[-1]:.2f} | EMA30: {ema30[-1]:.2f} | RSI: {rsi[-1]:.2f}")
 
             if ema10[-2] < ema30[-2] and ema10[-1] > ema30[-1] and rsi[-1] < 70:
-                print("Semnal BUY detectat.")
+                print("🟢 Semnal BUY detectat.")
                 place_order("Buy")
+
             elif ema10[-2] > ema30[-2] and ema10[-1] < ema30[-1] and rsi[-1] > 30:
-                print("Semnal SELL detectat.")
+                print("🔴 Semnal SELL detectat.")
                 place_order("Sell")
+
             else:
-                print("Niciun semnal valid.")
+                print("ℹ️ Niciun semnal valid.")
         else:
-            print("Nu s-au putut obține datele. Reîncerc în 60 secunde...")
+            print("⚠️ Nu s-au putut obține datele de kline.")
 
-        time.sleep(900)
+        time.sleep(60)  # 👉 schimbă la 900 pentru producție (15 minute)
 
+# ▶️ Rulează botul
 if __name__ == "__main__":
-    print(f"✅ Activare mesaj de pornire la ora {datetime.now().strftime('%H:%M')}")
     run_bot()
