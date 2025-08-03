@@ -1,62 +1,42 @@
-import requests
+import time
 import hmac
 import hashlib
+import requests
 import time
-from datetime import datetime
 
-# 🔐 Chei API – înlocuiește cu ale tale
-API_KEY = "API_KEY"
-API_SECRET = "API_SECRET"
-BASE_URL = "https://api.bybit.com"
+API_KEY = "OiMAM6nrYOpsuCGPRj"
+API_SECRET = "nU8Kjh75QB7ODdqj7AWMeJhw7O6EucZSrgD9"
 
-# ⚙️ Setări tranzacție test
-SYMBOL = "ETHUSDT"
-QTY = "0.01"
-SIDE = "Buy"  # poți schimba în "Sell"
-TAKE_PROFIT_PERCENT = 1.5
-STOP_LOSS_PERCENT = 0.8
+def get_signature(params, secret):
+    query_string = "&".join([f"{key}={params[key]}" for key in sorted(params)])
+    return hmac.new(bytes(secret, "utf-8"), bytes(query_string, "utf-8"), hashlib.sha256).hexdigest()
 
-def get_signature(params):
-    query = '&'.join(f"{k}={v}" for k, v in sorted(params.items()))
-    return hmac.new(API_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
+def test_futures_order():
+    url = "https://api.bybit.com/v5/order/create"
 
-def place_test_order():
+    timestamp = str(int(time.time() * 1000))
+    params = {
+        "apiKey": API_KEY,
+        "recvWindow": "5000",
+        "timestamp": timestamp,
+        "category": "linear",
+        "symbol": "ETHUSDT",
+        "side": "Buy",
+        "orderType": "Market",
+        "qty": "0.01",
+        "timeInForce": "GTC"
+    }
+
+    signature = get_signature(params, API_SECRET)
+    params["sign"] = signature
+
+    print("🧪 Testare imediat: ordine Bybit Futures")
+
     try:
-        print("📡 Obțin preț actual...")
-        price_resp = requests.get("https://api.bybit.com/v5/market/tickers", params={"category": "linear", "symbol": SYMBOL})
-        price_data = price_resp.json()
-        entry_price = float(price_data["result"]["list"][0]["lastPrice"])
-        print(f"💰 Preț actual {SYMBOL}: {entry_price}")
-
-        tp = round(entry_price * (1 + TAKE_PROFIT_PERCENT / 100), 2) if SIDE == "Buy" else round(entry_price * (1 - TAKE_PROFIT_PERCENT / 100), 2)
-        sl = round(entry_price * (1 - STOP_LOSS_PERCENT / 100), 2) if SIDE == "Buy" else round(entry_price * (1 + STOP_LOSS_PERCENT / 100), 2)
-
-        url = f"{BASE_URL}/v5/order/create"
-        timestamp = str(int(time.time() * 1000))
-
-        params = {
-            "category": "linear",
-            "symbol": SYMBOL,
-            "side": SIDE,
-            "orderType": "Market",
-            "qty": QTY,
-            "takeProfit": str(tp),
-            "stopLoss": str(sl),
-            "timeInForce": "GoodTillCancel",
-            "apiKey": API_KEY,
-            "timestamp": timestamp,
-            "recvWindow": "5000"
-        }
-
-        params["sign"] = get_signature(params)
-
-        print(f"🚀 Trimit ordin {SIDE} | TP: {tp} | SL: {sl}")
         response = requests.post(url, data=params)
-        print("🧾 Răspuns API:", response.text)
-
+        print("📦 Răspuns:", response.text)
     except Exception as e:
-        print(f"❌ Eroare la executare ordin: {e}")
+        print("❌ Eroare cerere:", str(e))
 
 if __name__ == "__main__":
-    print("⚙️ Testare imediată ordin Bybit Futures")
-    place_test_order()
+    test_futures_order()
